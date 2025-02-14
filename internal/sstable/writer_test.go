@@ -3,6 +3,7 @@ package sstable
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"os"
 	"testing"
@@ -11,6 +12,11 @@ import (
 type testEntry struct {
 	key   string
 	value string
+}
+
+type testEntryBytes struct {
+	key   string
+	value []byte
 }
 
 func TestWriterBasic(t *testing.T) {
@@ -56,6 +62,42 @@ func TestWriterBasic(t *testing.T) {
 
 	verifyFileContent(t, writer.filename, testData)
 
+}
+
+func TestWriterBlockBoundry(t *testing.T) {
+	tmpDir, err := os.MkdirTemp(".", "sstable_test_*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	writer, err := NewWriter(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to create writer: %v", err)
+	}
+
+	largeValue := make([]byte, BlockSize-100)
+	for i := range largeValue {
+		largeValue[i] = 'v'
+	}
+
+	testCases := []testEntryBytes{
+		{"key1", largeValue},
+		{"key2", []byte("small value")},
+		{"key3", largeValue},
+		{"emptyKey", []byte{}},
+	}
+
+	for _, tc := range testCases {
+		err = writer.Write(tc.key, tc.value)
+		if err != nil {
+			t.Fatalf("Failed to write large entry: %v", err)
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Failed to close writer: %v", err)
+	}
 }
 
 func verifyFileContent(t *testing.T, filename string, expectedData []testEntry) {
@@ -126,4 +168,32 @@ func verifyFileContent(t *testing.T, filename string, expectedData []testEntry) 
 		}
 	}
 
+}
+
+// Benchmark writing
+func BenchmarkWriter(b *testing.B) {
+	tmpDir, err := os.MkdirTemp(".", "sstable_bench_*")
+	if err != nil {
+		b.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	writer, err := NewWriter(tmpDir)
+	if err != nil {
+		b.Fatalf("Failed to create writer: %v", err)
+	}
+
+	value := []byte("test value")
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		key := fmt.Sprintf("key%d", i)
+		if err := writer.Write(key, value); err != nil {
+			b.Fatalf("Write failed: %v", err)
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		b.Fatalf("Failed to close writer: %v", err)
+	}
 }
