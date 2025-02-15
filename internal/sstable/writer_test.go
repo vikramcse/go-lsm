@@ -197,3 +197,5 @@ func BenchmarkWriter(b *testing.B) {
 		b.Fatalf("Failed to close writer: %v", err)
 	}
 }
+
+// TODO: add concurrent tests

@@ -3,6 +3,7 @@ package sstable
 import (
 	"bufio"
 	"encoding/binary"
+	"errors"
 	"hash/crc32"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 type Writer struct {
 	file      *os.File
 	block     *Block
+	index     *IBlock
 	bufWriter *bufio.Writer
 	filename  string
 	offset    uint64
@@ -35,6 +37,7 @@ func NewWriter(dir string) (*Writer, error) {
 		bufWriter: bufio.NewWriter(file),
 		filename:  full_file_name,
 		block:     NewBlock(),
+		index:     NewIBlock(),
 	}, nil
 }
 
@@ -55,6 +58,13 @@ func (w *Writer) flushBlock() error {
 	if w.block.IsEmpty() {
 		return nil
 	}
+
+	firstKey := w.block.entries[0].Key
+	blockHandle := BlockHandle{
+		Offset: w.offset,
+		Size:   uint64(w.block.size),
+	}
+	w.index.AddEntry(firstKey, blockHandle)
 
 	// Encode the data
 	data := w.block.Encode()
@@ -92,10 +102,64 @@ func (w *Writer) Close() error {
 		return err
 	}
 
-	// Flush buffer
+	// Store index block offset
+	indexOffset := w.offset
+
+	// Write the index block
+	indexData := w.index.Encode()
+	indexMetadata := &BlockMetadata{
+		Type:     IndexBlock,
+		CRC:      calculateCRC(indexData),
+		Size:     uint32(len(indexData)),
+		KeyCount: uint32(len(w.index.entries)),
+	}
+
+	// Write index metadata
+	if err := binary.Write(w.bufWriter, binary.LittleEndian, indexMetadata); err != nil {
+		return err
+	}
+
+	// Write index data
+	if _, err := w.bufWriter.Write(indexData); err != nil {
+		return err
+	}
+
+	// Update offset to include index block
+	w.offset += uint64(len(indexData)) + uint64(binary.Size(indexMetadata))
+
+	// Create and write footer
+	footer := &Footer{
+		IndexHandle:     BlockHandle{Offset: indexOffset, Size: uint64(len(indexData))},
+		MagicNumber:     MagicNumber,
+		Version:         CurrentVersion,
+		CreatedAt:       time.Now().Unix(),
+		CompressionType: NoCompression,
+	}
+
+	// Flush buffer before writing footer
 	if err := w.bufWriter.Flush(); err != nil {
 		return err
 	}
 
+	// Ensure footer is exactly FooterSize bytes
+	footerData := footer.Encode()
+	if len(footerData) > FooterSize {
+		return errors.New("footer exceeds FooterSize")
+	}
+
+	// Pad footer data if necessary
+	if len(footerData) < FooterSize {
+		footerData = append(footerData, make([]byte, FooterSize-len(footerData))...)
+	}
+
+	if _, err := w.file.Write(footerData); err != nil {
+		return err
+	}
+
 	return w.file.Close()
+}
+
+// Filename returns the name of the SSTable file
+func (w *Writer) Filename() string {
+	return w.filename
 }
