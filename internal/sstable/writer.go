@@ -1,3 +1,7 @@
+// Package sstable provides functionality for creating and reading SSTable files.
+// The Writer is responsible for creating new SSTable files and writing data in
+// the correct format.
+
 package sstable
 
 import (
@@ -12,14 +16,18 @@ import (
 	golsm "github.com/vikramcse/go-lsm"
 )
 
-// Writer handles writing SSTable files
+// Writer handles writing SSTable files. It manages:
+// - Creating and writing data blocks
+// - Building and writing the index block
+// - Writing the footer
+// - Managing block boundaries and file offsets
 type Writer struct {
-	file      *os.File
-	block     *Block
-	index     *IBlock
-	bufWriter *bufio.Writer
-	filename  string
-	offset    uint64
+	file      *os.File      // The SSTable file being written
+	block     *Block        // Current data block being built
+	index     *IBlock       // Index block being built
+	bufWriter *bufio.Writer // Buffered writer for better performance
+	filename  string        // Name of the SSTable file
+	offset    uint64        // Current offset in the file
 }
 
 // NewWriter creates a new SSTable writer
@@ -41,7 +49,11 @@ func NewWriter(dir string) (*Writer, error) {
 	}, nil
 }
 
-// Write adds a key-value pair to the SSTable
+// Write adds a key-value pair to the SSTable.
+// The process:
+// 1. If current block is full, flush it to disk
+// 2. Add the key-value pair to current block
+// 3. Update index when blocks are flushed
 func (w *Writer) Write(key string, value []byte) error {
 	if w.block.IsFull() {
 		if err := w.flushBlock(); err != nil {
@@ -95,7 +107,11 @@ func (w *Writer) flushBlock() error {
 	return nil
 }
 
-// Close finalizes the SSTable file
+// Close finalizes the SSTable file by:
+// 1. Flushing any remaining data in the current block
+// 2. Writing the index block
+// 3. Writing the footer
+// 4. Closing the file
 func (w *Writer) Close() error {
 	// Flush any remaining data
 	if err := w.flushBlock(); err != nil {

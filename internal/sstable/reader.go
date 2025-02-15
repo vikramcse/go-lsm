@@ -8,6 +8,12 @@ import (
 	"os"
 )
 
+// Reader provides functionality to read from SSTable files.
+// It supports:
+// - Loading and validating the index block
+// - Binary search through index entries
+// - Reading and searching data blocks
+// - Key-value pair retrieval
 type Reader struct {
 	file       *os.File
 	indexBlock *IBlock
@@ -139,7 +145,11 @@ func (r *Reader) decodeIndexBlock(data []byte) error {
 	return nil
 }
 
-// Get retrieves the value for a given key
+// Get retrieves the value for a given key using the following process:
+// 1. Binary search through index entries to find the right data block
+// 2. Read the data block from disk
+// 3. Binary search within the data block to find the key
+// 4. Return the value if found, or error if not found
 func (r *Reader) Get(key []byte) ([]byte, error) {
 	if r.indexBlock == nil {
 		return nil, errors.New("index block not loaded")
